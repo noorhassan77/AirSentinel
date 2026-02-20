@@ -301,6 +301,13 @@ class FeatureExtractor:
         features['beacon_count'] = len(recent_obs)
         features['channel_stability'] = 1 - (features['channel_changes'] / max(len(recent_obs), 1))
         
+        # Convert numpy types to standard python types for JSON serialization
+        for key, value in features.items():
+            if hasattr(value, 'item'):
+                features[key] = value.item()
+            elif isinstance(value, np.ndarray):
+                features[key] = value.tolist()
+
         return features
     
     def print_summary(self):

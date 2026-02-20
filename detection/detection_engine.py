@@ -15,6 +15,7 @@ from datetime import datetime
 from collections import defaultdict
 import json
 import argparse
+from data_collection.channel_hopper import ChannelHopper
 
 
 class AirSentinelEngine:
@@ -300,54 +301,66 @@ class AirSentinelEngine:
                 bssid_analysis.append(other_info)
             
             if len(bssid_analysis) > 1:
-                # Determine which one is more suspicious
-                # The EVIL TWIN is typically:
-                # 1. Has software MAC (locally administered)
-                # 2. Appeared more recently
-                # 3. More unstable signal
-                # 4. Unknown vendor when others are known
+                # Collect all vendors
+                all_vendors = [b['vendor'] for b in bssid_analysis]
+                unique_vendors = set(all_vendors)
                 
-                has_software_mac = any(b['locally_admin'] == 1 for b in bssid_analysis)
+                # Count software MACs
+                software_mac_count = sum(1 for b in bssid_analysis if b['locally_admin'] == 1)
+                current_has_software_mac = any(b['is_current'] and b['locally_admin'] == 1 for b in bssid_analysis)
                 
-                if has_software_mac:
-                    # Find which one has software MAC
-                    software_mac_bssids = [b for b in bssid_analysis if b['locally_admin'] == 1]
-                    current_is_software = bssid in [b['bssid'] for b in software_mac_bssids]
+                # CASE 1: All same known vendor (e.g., all Cisco)
+                # → Enterprise WiFi - DON'T FLAG
+                if len(unique_vendors) == 1 and list(unique_vendors)[0] not in ['Unknown', '']:
+                    # All Cisco, or all Aruba, etc. = legitimate enterprise
+                    pass
+                
+                # CASE 2: All "Unknown" vendor, all hardware MACs
+                # → Likely home router + extender - DON'T FLAG
+                elif len(unique_vendors) == 1 and list(unique_vendors)[0] == 'Unknown' and software_mac_count == 0:
+                    # E.g., "Lord of the Pings" + "Lord of the Pings_EXT"
+                    pass
+                
+                # CASE 3: Current AP has software MAC
+                # → THIS is the evil twin - FLAG IT
+                elif current_has_software_mac:
+                    is_threat = True
+                    threat_level = 'HIGH'
+                    reasons.append(f"Evil twin detected: Software MAC among {ssid_bssid_count} BSSIDs")
+                
+                # CASE 4: Mixed vendors (some known, some unknown) with hardware MACs
+                # → Possible evil twin using hardware device
+                elif len(unique_vendors) > 1 and 'Unknown' in unique_vendors:
+                    # One Cisco, one Unknown = suspicious
+                    # But don't flag the known vendor one
+                    current_vendor = [b['vendor'] for b in bssid_analysis if b['is_current']][0]
                     
-                    if current_is_software:
-                        # Current AP has software MAC = THIS is the evil twin
+                    if current_vendor == 'Unknown':
+                        # We are the unknown one among known vendors = suspicious
                         is_threat = True
                         threat_level = 'HIGH'
-                        reasons.append(f"Software MAC detected with {ssid_bssid_count} BSSIDs (YOU are the evil twin)")
-                    else:
-                        # Current AP has hardware MAC, other has software = other is evil twin
-                        # Don't flag the legitimate one
-                        pass
+                        reasons.append(f"Unknown AP among known vendors ({unique_vendors})")
+                    # else: We are the known vendor = don't flag
                 
-                else:
-                    # All hardware MACs - check which appeared later
-                    # The newer one is more likely to be the evil twin
+                # CASE 5: Multiple unknown vendors with hardware MACs
+                # → Check age difference (evil twin appears suddenly)
+                elif 'Unknown' in unique_vendors and software_mac_count == 0:
                     sorted_by_age = sorted(bssid_analysis, key=lambda x: x['first_seen'])
                     oldest = sorted_by_age[0]
                     newest = sorted_by_age[-1]
-                    
-                    # Also check signal stability
                     current_info = [b for b in bssid_analysis if b['is_current']][0]
                     
-                    # Only flag if:
-                    # - Current is the newest (appeared after others)
-                    # - AND has worse signal stability
-                    is_newest = current_info['first_seen'] == newest['first_seen']
-                    is_most_unstable = current_info['rssi_std'] == max(b['rssi_std'] for b in bssid_analysis)
+                    # Time difference between oldest and newest
+                    age_diff = (newest['first_seen'] - oldest['first_seen']).total_seconds()
                     
-                    if is_newest and is_most_unstable and len(bssid_analysis) == 2:
+                    # If newest appeared >30 seconds after oldest = suspicious
+                    # (Enterprise APs are usually all on at same time)
+                    is_current_newest = current_info['first_seen'] == newest['first_seen']
+                    
+                    if is_current_newest and age_diff > 30:
                         is_threat = True
-                        threat_level = 'HIGH'
-                        reasons.append(f"Recently appeared AP with multiple BSSIDs (possible evil twin)")
-                    elif not is_newest:
-                        # This is the older, more stable one = legitimate
-                        # Don't flag it
-                        pass
+                        threat_level = 'MEDIUM'
+                        reasons.append(f"Recently appeared ({age_diff:.0f}s after others) with same SSID")
         
         # Rule 5: Very unstable signal
         if features.get('signal_stability', 1.0) < 0.5:
@@ -556,46 +569,54 @@ class AirSentinelEngine:
         
         print("="*70)
     
-    def start(self, interface='wlan0mon', duration=None):
-        """Start detection"""
-        
+    def start(self, interface='wlan0mon', duration=None,
+          channels=None, dwell_time=1.0):
+
         print(f"Interface: {interface}")
-        if duration:
-            print(f"Duration:  {duration}s")
+
+        if channels:
+            print(f"Channel hopping enabled: {channels}")
+            hopper = ChannelHopper(interface, channels, dwell_time)
+            hopper.start()
         else:
-            print(f"Duration:  Continuous (Ctrl+C to stop)")
+            hopper = None
+
         print()
-        print("Starting in 3 seconds...")
+        print("Starting detection...")
         print()
-        
-        import time
-        time.sleep(3)
-        
-        print("="*70)
-        print("🚨 DETECTION ACTIVE")
-        print("="*70)
-        print()
-        
+
         try:
-            # Status updater
             packet_count = [0]
-            
+
             def packet_handler(pkt):
+                # Optional: tag packet with current channel
+                if hopper:
+                    pkt.current_channel = hopper.get_current_channel()
+
                 self.observe_packet(pkt)
+
                 packet_count[0] += 1
                 if packet_count[0] % 100 == 0:
                     self.print_status()
-            
-            if duration:
-                sniff(iface=interface, prn=packet_handler, timeout=duration, store=False)
-            else:
-                sniff(iface=interface, prn=packet_handler, store=False)
-        
-        except KeyboardInterrupt:
-            print("\n\n[*] Stopping detection...")
-        
-        self.print_summary()
 
+            if duration:
+                sniff(iface=interface,
+                    prn=packet_handler,
+                    timeout=duration,
+                    store=False)
+            else:
+                sniff(iface=interface,
+                    prn=packet_handler,
+                    store=False)
+
+        except KeyboardInterrupt:
+            print("\nStopping detection...")
+
+        finally:
+            if hopper:
+                hopper.stop()
+
+        self.print_summary()
 
 def main():
     parser = argparse.ArgumentParser(

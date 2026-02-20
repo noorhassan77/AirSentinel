@@ -38,7 +38,7 @@ class ChannelHopper:
 			stderr=subprocess.DEVNULL
 		)
 		self.current_channel = channel
-		print(f"[HOP] Now listening on channel {channel}")
+		#print(f"[HOP] Now listening on channel {channel}")
 		
 	def _hop_loop(self):
 		while not self._stop_event.is_set():
