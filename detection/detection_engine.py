@@ -16,6 +16,7 @@ from collections import defaultdict
 import json
 import argparse
 from data_collection.channel_hopper import ChannelHopper
+from utils.notifications import TelegramNotifier
 
 
 class AirSentinelEngine:
@@ -24,7 +25,7 @@ class AirSentinelEngine:
     Uses pre-trained model for real-time detection
     """
     
-    def __init__(self, model_path, scaler_path=None, min_packets=10, alert_threshold=-0.3):
+    def __init__(self, model_path, scaler_path=None, min_packets=10, alert_threshold=-0.3, telegram_token=None, telegram_chat_id=None):
         """
         Initialize detection engine
         
@@ -165,9 +166,26 @@ class AirSentinelEngine:
         self.total_packets = 0
         self.start_time = datetime.now()
         
+        # Notifications
+        self.notifier = TelegramNotifier(telegram_token, telegram_chat_id)
+        self.IS_NOTIF_ON = False
+        # Load Configuration
+        config_path = 'data/config.json'
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as file:
+                    config = json.load(file)
+                    val = config.get("IS_NOTIF_ON", "False")
+                    self.IS_NOTIF_ON = val.lower() == "true" if isinstance(val, str) else bool(val)
+            except Exception as e:
+                print(f"  [!] Error loading config.json: {e}")
+        else:
+            print(f"  [!] Config file not found at {config_path}, using defaults.")
+        
         print("[*] Configuration:")
         print(f"  Min packets for detection: {min_packets}")
         print(f"  Alert threshold: {alert_threshold}")
+        print(f"  Notfications: {self.IS_NOTIF_ON}")
         print()
     
     def observe_packet(self, packet):
@@ -222,7 +240,10 @@ class AirSentinelEngine:
                 self.check_threat(bssid)
     
     def check_threat(self, bssid):
-        """Check if AP is a threat"""
+        """
+        Check if AP is a threat. 
+        Modified to ONLY detect Evil Twins (SSID collisions) as per user request.
+        """
         
         # Extract features
         features = self._extract_features(bssid)
@@ -231,147 +252,109 @@ class AirSentinelEngine:
         
         ssid = features.get('ssid', 'Unknown')
         
-        # Prepare feature vector
-        feature_vector = []
-        for fname in self.feature_names:
-            feature_vector.append(features.get(fname, 0))
-        
+        # 1. Gather Suspicion Factors (but don't set is_threat yet)
+        feature_vector = [features.get(fname, 0) for fname in self.feature_names]
         X = np.array(feature_vector).reshape(1, -1)
         X_scaled = self.scaler.transform(X)
         
-        # Predict
         prediction = self.model.predict(X_scaled)[0]
         score = self.model.decision_function(X_scaled)[0]
         
-        # Determine threat level
-        is_threat = False
-        threat_level = 'NONE'
+        is_suspicious = False
         reasons = []
         
-        # Rule 1: Score below threshold (PRIMARY CHECK)
+        # Anomaly Score check
         if score < self.alert_threshold:
-            is_threat = True
-            threat_level = 'MEDIUM'
+            is_suspicious = True
             reasons.append(f"Low anomaly score ({score:.3f} < {self.alert_threshold})")
-        
-        # Rule 2: Model says anomaly AND score is bad
-        # (Don't flag if model says anomaly but score is above threshold)
+            
         if prediction == -1 and score < self.alert_threshold:
-            if not is_threat:
-                is_threat = True
-                threat_level = 'MEDIUM'
-            reasons.append(f"Anomalous behavior (score: {score:.3f})")
+            reasons.append(f"Anomalous behavior detected by model (score: {score:.3f})")
+            
+        # Software MAC check
+        current_has_software_mac = features.get('locally_administered_mac', 0) == 1
+        if current_has_software_mac:
+            is_suspicious = True
+            reasons.append("Software MAC detected (typical of hotspots/software APs)")
+            
+        # Signal Stability check (supplementary reason)
+        stability = features.get('signal_stability', 1.0)
+        if stability < 0.5:
+            reasons.append(f"Highly unstable signal (stability: {stability:.2f})")
+            
+        # 2. Check for SSID collision (The "Evil Twin" condition)
+        same_ssid_bssids = list(self.ssid_bssid_map[ssid])
+        ssid_bssid_count = len(same_ssid_bssids)
         
-        # Rule 3: Software MAC (hotspot)
-        if features.get('locally_administered_mac', 0) == 1:
+        # GATEKEEPER: Only flag if there are multiple BSSIDs for this SSID
+        if ssid_bssid_count <= 1:
+            # We ignore standalone hotspots or anomalous APs as per instructions
+            return
+            
+        # 3. Analyze the group of APs sharing this SSID
+        is_threat = False
+        threat_level = 'NONE'
+        
+        bssid_analysis = []
+        for other_bssid in same_ssid_bssids:
+            other_obs = self.ap_observations.get(other_bssid, [])
+            if len(other_obs) < 3:
+                continue
+            
+            other_info = {
+                'bssid': other_bssid,
+                'vendor': self.ap_info[other_bssid].get('vendor', 'Unknown'),
+                'locally_admin': other_obs[0].get('locally_admin', 0),
+                'first_seen': self.ap_info[other_bssid]['first_seen'],
+                'is_current': other_bssid == bssid
+            }
+            bssid_analysis.append(other_info)
+            
+        if len(bssid_analysis) < 2:
+            # Not enough data on peers yet
+            return
+            
+        # Check for presence of an authentic (hardware) peer
+        other_bssids = [b for b in bssid_analysis if not b['is_current']]
+        has_authentic_peer = any(b['locally_admin'] == 0 for b in other_bssids)
+        
+        # MAIN RULE: Current AP is suspicious AND an authentic peer exists
+        if is_suspicious and has_authentic_peer:
             is_threat = True
-            threat_level = 'MEDIUM'
-            reasons.append("Software MAC (hotspot/virtual AP)")
-        
-        # Rule 4: Multiple BSSIDs (evil twin indicator)
-        ssid_bssid_count = len(self.ssid_bssid_map[ssid])
-        if ssid_bssid_count > 1:
-            # When multiple BSSIDs exist, compare them to find the fake one
-            same_ssid_bssids = list(self.ssid_bssid_map[ssid])
-            
-            # Analyze all BSSIDs with this SSID
-            bssid_analysis = []
-            for other_bssid in same_ssid_bssids:
-                other_obs = self.ap_observations.get(other_bssid, [])
-                if len(other_obs) < 3:
-                    continue
+            threat_level = 'HIGH'
+            reasons.insert(0, f"Evil Twin detected: Suspicious AP shadowing an authentic hardware AP ('{ssid}')")
                 
-                other_info = {
-                    'bssid': other_bssid,
-                    'vendor': self.ap_info[other_bssid].get('vendor', 'Unknown'),
-                    'locally_admin': other_obs[0].get('locally_admin', 0),
-                    'first_seen': self.ap_info[other_bssid]['first_seen'],
-                    'is_current': other_bssid == bssid
-                }
-                
-                # Calculate signal stability for this BSSID
-                rssi_vals = [o['rssi'] for o in other_obs if o.get('rssi')]
-                if rssi_vals:
-                    other_info['rssi_std'] = np.std(rssi_vals)
-                    other_info['rssi_mean'] = np.mean(rssi_vals)
-                else:
-                    other_info['rssi_std'] = 999
-                    other_info['rssi_mean'] = -100
-                
-                bssid_analysis.append(other_info)
-            
-            if len(bssid_analysis) > 1:
-                # Collect all vendors
-                all_vendors = [b['vendor'] for b in bssid_analysis]
-                unique_vendors = set(all_vendors)
-                
-                # Count software MACs
-                software_mac_count = sum(1 for b in bssid_analysis if b['locally_admin'] == 1)
-                current_has_software_mac = any(b['is_current'] and b['locally_admin'] == 1 for b in bssid_analysis)
-                
-                # CASE 1: All same known vendor (e.g., all Cisco)
-                # → Enterprise WiFi - DON'T FLAG
-                if len(unique_vendors) == 1 and list(unique_vendors)[0] not in ['Unknown', '']:
-                    # All Cisco, or all Aruba, etc. = legitimate enterprise
-                    pass
-                
-                # CASE 2: All "Unknown" vendor, all hardware MACs
-                # → Likely home router + extender - DON'T FLAG
-                elif len(unique_vendors) == 1 and list(unique_vendors)[0] == 'Unknown' and software_mac_count == 0:
-                    # E.g., "Lord of the Pings" + "Lord of the Pings_EXT"
-                    pass
-                
-                # CASE 3: Current AP has software MAC
-                # → THIS is the evil twin - FLAG IT
-                elif current_has_software_mac:
+        # CASE 3: Vendor Mismatch among hardware MACs (Secondary check)
+        elif not current_has_software_mac:
+            unique_vendors = set(b['vendor'] for b in bssid_analysis)
+            if len(unique_vendors) > 1 and 'Unknown' in unique_vendors:
+                current_vendor = features.get('vendor', 'Unknown')
+                if current_vendor == 'Unknown':
                     is_threat = True
                     threat_level = 'HIGH'
-                    reasons.append(f"Evil twin detected: Software MAC among {ssid_bssid_count} BSSIDs")
+                    reasons.append(f"Unknown AP vendor among known providers for SSID '{ssid}'")
                 
-                # CASE 4: Mixed vendors (some known, some unknown) with hardware MACs
-                # → Possible evil twin using hardware device
-                elif len(unique_vendors) > 1 and 'Unknown' in unique_vendors:
-                    # One Cisco, one Unknown = suspicious
-                    # But don't flag the known vendor one
-                    current_vendor = [b['vendor'] for b in bssid_analysis if b['is_current']][0]
-                    
-                    if current_vendor == 'Unknown':
-                        # We are the unknown one among known vendors = suspicious
-                        is_threat = True
-                        threat_level = 'HIGH'
-                        reasons.append(f"Unknown AP among known vendors ({unique_vendors})")
-                    # else: We are the known vendor = don't flag
+        # CASE 4: Age difference check (only if already somewhat suspicious)
+        if not is_threat and is_suspicious and len(bssid_analysis) > 1:
+            sorted_by_age = sorted(bssid_analysis, key=lambda x: x['first_seen'])
+            if sorted_by_age[-1]['bssid'] == bssid:
+                age_diff = (sorted_by_age[-1]['first_seen'] - sorted_by_age[0]['first_seen']).total_seconds()
+                if age_diff > 30:
+                    # Only flag if there's at least one other AP that appeared much earlier
+                    is_threat = True
+                    threat_level = 'MEDIUM'
+                    reasons.append(f"AP appeared significantly later ({age_diff:.0f}s) than others with same SSID")
+
+        # FALSE POSITIVE MITIGATION (Enterprise WiFi)
+        if is_threat and not current_has_software_mac:
+            unique_vendors = set(b['vendor'] for b in bssid_analysis)
+            if len(unique_vendors) == 1 and list(unique_vendors)[0] in ['Cisco', 'Aruba', 'Ubiquiti', 'Ruckus']:
+                is_threat = False
                 
-                # CASE 5: Multiple unknown vendors with hardware MACs
-                # → Check age difference (evil twin appears suddenly)
-                elif 'Unknown' in unique_vendors and software_mac_count == 0:
-                    sorted_by_age = sorted(bssid_analysis, key=lambda x: x['first_seen'])
-                    oldest = sorted_by_age[0]
-                    newest = sorted_by_age[-1]
-                    current_info = [b for b in bssid_analysis if b['is_current']][0]
-                    
-                    # Time difference between oldest and newest
-                    age_diff = (newest['first_seen'] - oldest['first_seen']).total_seconds()
-                    
-                    # If newest appeared >30 seconds after oldest = suspicious
-                    # (Enterprise APs are usually all on at same time)
-                    is_current_newest = current_info['first_seen'] == newest['first_seen']
-                    
-                    if is_current_newest and age_diff > 30:
-                        is_threat = True
-                        threat_level = 'MEDIUM'
-                        reasons.append(f"Recently appeared ({age_diff:.0f}s after others) with same SSID")
-        
-        # Rule 5: Very unstable signal
-        if features.get('signal_stability', 1.0) < 0.5:
-            is_threat = True
-            if threat_level == 'NONE':
-                threat_level = 'LOW'
-            reasons.append(f"Unstable signal (stability: {features['signal_stability']:.2f})")
-        
-        # Alert if threat
+        # Final Alert
         if is_threat:
             self.alert(bssid, ssid, threat_level, reasons, score, features)
+        
     
     def alert(self, bssid, ssid, level, reasons, score, features):
         """Send alert"""
@@ -431,6 +414,8 @@ class AirSentinelEngine:
         
         # Log to file
         self._log_alert(alert)
+        if self.IS_NOTIF_ON:
+            self.notifier.send_alert(alert)
     
     def _extract_features(self, bssid):
         """Extract features for a BSSID"""
@@ -501,16 +486,17 @@ class AirSentinelEngine:
     
     def _log_alert(self, alert):
         """Log alert to file"""
-        
-        os.makedirs('logs', exist_ok=True)
-        
-        log_file = f"logs/alerts_{datetime.now().strftime('%Y%m%d')}.json"
-        
-        # Serialize datetime
         alert_copy = alert.copy()
         alert_copy['timestamp'] = alert['timestamp'].isoformat()
         
-        # Append to log
+        # Exclude features from the JSON output as requested
+        if 'features' in alert_copy:
+            del alert_copy['features']
+            
+        # Ensure data directory exists
+        os.makedirs('data', exist_ok=True)
+        log_file = "data/alerts.json"
+        
         try:
             if os.path.exists(log_file):
                 with open(log_file, 'r') as f:
@@ -522,8 +508,8 @@ class AirSentinelEngine:
             
             with open(log_file, 'w') as f:
                 json.dump(logs, f, indent=2)
-        except:
-            pass
+        except Exception as e:
+            print(f"Error logging alert: {e}")
     
     def print_status(self):
         """Print current status"""

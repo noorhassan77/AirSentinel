@@ -38,7 +38,7 @@ def main():
         model_path=args.model,
         scaler_path=args.scaler,
         min_packets=args.min_packets,
-        alert_threshold=args.threshold
+        alert_threshold=args.threshold,
     )
 
     engine.start(
