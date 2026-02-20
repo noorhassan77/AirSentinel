@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evil Twin Detection System</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #fafbfc;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f5f7fa;
+            --text-primary: #1a1d29;
+            --text-secondary: #5f6b7a;
+            --text-tertiary: #9ca3af;
+            --accent-primary: #2563eb;
+            --accent-hover: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #e5e7eb;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #0f1117;
+            --bg-secondary: #1a1d29;
+            --bg-tertiary: #232730;
+            --text-primary: #e5e7eb;
+            --text-secondary: #9ca3af;
+            --text-tertiary: #6b7280;
+            --accent-primary: #ff0000;
+            --accent-hover: #ff9898;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #2d3139;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .container {
+            max-width: 1440px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        /* Header */
+        header {
+            margin-bottom: 3rem;
+            animation: fadeInDown 0.6s ease-out;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+        }
+
+        h1 {
+            font-family: 'Sora', sans-serif;
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.02em;
+        }
+
+        .status-group {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s;
+        }
+
+        .status-badge.active {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: rgba(16, 185, 129, 0.3);
+            color: var(--success);
+        }
+
+        .status-badge.disconnected {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        .status-dot.disconnected {
+            background: var(--danger);
+            animation: none;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        /* Theme Toggle */
+        .theme-toggle {
+            position: relative;
+            width: 60px;
+            height: 32px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            padding: 0 4px;
+        }
+
+        .theme-toggle:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .theme-toggle-slider {
+            width: 24px;
+            height: 24px;
+            background: var(--accent-primary);
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+        }
+
+        [data-theme="dark"] .theme-toggle-slider {
+            transform: translateX(28px);
+        }
+
+        /* Metrics Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2.5rem;
+            animation: fadeInUp 0.6s ease-out 0.1s both;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .metric-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.75rem;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-primary), var(--accent-hover));
+            transform: scaleX(0);
+            transition: transform 0.3s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--accent-primary);
+        }
+
+        .metric-card:hover::before {
+            transform: scaleX(1);
+        }
+
+        .metric-card.flash {
+            animation: flash 0.4s ease-out;
+        }
+
+        @keyframes flash {
+
+            0%,
+            100% {
+                background: var(--bg-secondary);
+            }
+
+            50% {
+                background: rgba(37, 99, 235, 0.1);
+            }
+        }
+
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 1rem;
+        }
+
+        .metric-label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+        }
+
+        .metric-value {
+            font-family: 'Sora', sans-serif;
+            font-size: 2.5rem;
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .metric-value.danger {
+            color: var(--danger);
+        }
+
+        .metric-change {
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-size: 0.875rem;
+            color: var(--success);
+            font-weight: 500;
+        }
+
+        .metric-change.neutral {
+            color: var(--text-tertiary);
+        }
+
+        /* Dashboard Grid */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+            animation: fadeInUp 0.6s ease-out 0.2s both;
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.3s;
+        }
+
+        .panel:hover {
+            box-shadow: var(--shadow-md);
+        }
+
+        .panel-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-tertiary);
+        }
+
+        .panel-title {
+            font-family: 'Sora', sans-serif;
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .panel-content {
+            padding: 1.5rem;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .panel-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .panel-content::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+        }
+
+        .panel-content::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        .panel-content::-webkit-scrollbar-thumb:hover {
+            background: var(--text-tertiary);
+        }
+
+        /* Threat Items */
+        .threat-item {
+            background: rgba(239, 68, 68, 0.1);
+            border-left: 3px solid var(--danger);
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            transition: all 0.3s;
+        }
+
+        .threat-item:hover {
+            transform: translateX(4px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .threat-item.new {
+            animation: slideInLeft 0.5s ease-out;
+        }
+
+        @keyframes slideInLeft {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .threat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .threat-name {
+            font-weight: 600;
+            font-size: 1.05rem;
+            color: var(--text-primary);
+        }
+
+        .severity-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .severity-badge.critical {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+        }
+
+        .severity-badge.high {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning);
+        }
+
+        .severity-badge.medium {
+            background: rgba(250, 204, 21, 0.2);
+            color: #eab308;
+        }
+
+        .threat-details {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .threat-details strong {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        /* Network Items */
+        .network-item {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 3px solid var(--success);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            transition: all 0.3s;
+        }
+
+        .network-item:hover {
+            transform: translateX(4px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .network-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .network-stats {
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .network-stat {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+        }
+
+        /* Timeline */
+        .full-width {
+            grid-column: 1 / -1;
+            animation: fadeInUp 0.6s ease-out 0.3s both;
+        }
+
+        .timeline-item {
+            display: flex;
+            gap: 1rem;
+            padding: 1.25rem 0;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+        }
+
+        .timeline-item:hover {
+            background: var(--bg-tertiary);
+            margin: 0 -1.5rem;
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
+        }
+
+        .timeline-item.new {
+            animation: fadeInDown 0.4s ease-out;
+        }
+
+        .timeline-time {
+            font-family: 'Sora', sans-serif;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+            min-width: 80px;
+        }
+
+        .timeline-content {
+            flex: 1;
+        }
+
+        .timeline-action {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .timeline-description {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            gap: 1rem;
+            margin-top: 2.5rem;
+            flex-wrap: wrap;
+            animation: fadeInUp 0.6s ease-out 0.4s both;
+        }
+
+        .btn {
+            font-family: 'Sora', sans-serif;
+            padding: 0.875rem 1.75rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9375rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-primary {
+            background: var(--accent-primary);
+            color: white;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: var(--bg-tertiary);
+            border-color: var(--accent-primary);
+            box-shadow: var(--shadow-md);
+            transform: translateY(-1px);
+        }
+
+        /* Loading & Empty States */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-tertiary);
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-tertiary);
+        }
+
+        .empty-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Notifications */
+        .notification {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--danger);
+            border-radius: 12px;
+            padding: 1.25rem 1.5rem;
+            box-shadow: var(--shadow-xl);
+            max-width: 400px;
+            z-index: 1000;
+            animation: slideInRight 0.3s ease-out;
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .notification-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .notification-icon {
+            font-size: 1.5rem;
+        }
+
+        .notification-title {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .notification-message {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 1.5rem 1rem;
+            }
+
+            h1 {
+                font-size: 1.5rem;
+            }
+
+            .header-content {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .notification {
+                left: 1rem;
+                right: 1rem;
+            }
+
+            .status-group {
+                flex-wrap: wrap;
+            }
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 2000;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 480px;
+            padding: 2.5rem;
+            box-shadow: var(--shadow-xl);
+        }
+
+        .modal-header {
+            margin-bottom: 2rem;
+        }
+
+        .modal-title {
+            font-family: 'Sora', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .form-group {
+            margin-bottom: 2rem;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+        }
+
+        .form-input {
+            width: 100%;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.875rem 1rem;
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 1rem;
+            transition: all 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .toggle-btn {
+            width: 48px;
+            height: 24px;
+            background: var(--border);
+            border-radius: 12px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .toggle-btn::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .toggle-btn.active {
+            background: var(--success);
+        }
+
+        .toggle-btn.active::after {
+            transform: translateX(24px);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: flex-end;
+            margin-top: 2.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <h1>Evil Twin Detection</h1>
+                <div class="status-group">
+                    <div class="status-badge" id="systemStatus">
+                        <div class="status-dot"></div>
+                        <span id="statusText">Connecting...</span>
+                    </div>
+                    <div class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                        <div class="theme-toggle-slider">
+                            <span id="themeIcon">☀️</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-header">
+                    <div class="metric-label">Networks Scanned</div>
+                    <div class="metric-icon">📡</div>
+                </div>
+                <div class="metric-value" id="networksScanned">--</div>
+                <div class="metric-change" id="networksChange">
+                    <span>Loading...</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-header">
+                    <div class="metric-label">Threats Detected</div>
+                    <div class="metric-icon">⚠️</div>
+                </div>
+                <div class="metric-value danger" id="threatsDetected">--</div>
+                <div class="metric-change neutral" id="threatsChange">
+                    <span>Loading...</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-header">
+                    <div class="metric-label">Protected Devices</div>
+                    <div class="metric-icon">🛡️</div>
+                </div>
+                <div class="metric-value" id="protectedDevices">--</div>
+                <div class="metric-change" id="devicesChange">
+                    <span>Loading...</span>
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <div class="metric-header">
+                    <div class="metric-label">Detection Rate</div>
+                    <div class="metric-icon">📊</div>
+                </div>
+                <div class="metric-value" id="detectionRate">--</div>
+                <div class="metric-change" id="rateChange">
+                    <span>Loading...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Active Threats</div>
+                </div>
+                <div class="panel-content" id="threatsPanel">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading threats...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Monitored Networks</div>
+                </div>
+                <div class="panel-content" id="networksPanel">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading networks...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="dashboard-grid full-width">
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title">Activity Timeline</div>
+                </div>
+                <div class="panel-content" id="timelinePanel">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading activity...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="btn btn-primary" id="scanBtn" onclick="forceScan()">
+                <span>Force Scan</span>
+            </button>
+            <button class="btn btn-secondary" onclick="exportReport()">
+                <span>Export Report</span>
+            </button>
+            <button class="btn btn-secondary" onclick="configureAlerts()">
+                <span>Configure Alerts</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Configuration Modal -->
+    <div class="modal-overlay" id="configModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">Alert Configuration</div>
+            </div>
+            <div class="modal-content">
+                <div class="form-group">
+                    <div class="toggle-row">
+                        <label class="form-label">Telegram Notifications</label>
+                        <div class="toggle-btn" id="notifToggle" onclick="toggleNotif()"></div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="channelId">Telegram Channel ID</label>
+                    <input type="text" id="channelId" class="form-input" placeholder="e.g. -100123456789">
+                    <small style="color: var(--text-tertiary); font-size: 0.75rem; margin-top: 0.5rem; display: block;">
+                        The Bot must be an admin of the specified channel.
+                    </small>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeConfig()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveConfig()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+        let eventSource = null;
+
+        // Theme Management
+        function toggleTheme() {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+
+            html.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+
+            const themeIcon = document.getElementById('themeIcon');
+            themeIcon.textContent = newTheme === 'dark' ? '🌙' : '☀️';
+        }
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const theme = savedTheme || (prefersDark ? 'dark' : 'light');
+
+            document.documentElement.setAttribute('data-theme', theme);
+            document.getElementById('themeIcon').textContent = theme === 'dark' ? '🌙' : '☀️';
+        }
+
+        class APIService {
+            async get(endpoint) {
+                try {
+                    const response = await fetch(`${API_BASE_URL}${endpoint}`);
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    console.error(`API Error (${endpoint}):`, error);
+                    throw error;
+                }
+            }
+
+            async post(endpoint, data) {
+                try {
+                    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data),
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    console.error(`API Error (${endpoint}):`, error);
+                    throw error;
+                }
+            }
+        }
+
+        const api = new APIService();
+
+        function showNotification(title, message) {
+            const notification = document.createElement('div');
+            notification.className = 'notification';
+            notification.innerHTML = `
+                <div class="notification-header">
+                    <span class="notification-icon">🚨</span>
+                    <div class="notification-title">${title}</div>
+                </div>
+                <div class="notification-message">${message}</div>
+            `;
+            document.body.appendChild(notification);
+
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                notification.style.transform = 'translateX(100%)';
+                setTimeout(() => notification.remove(), 300);
+            }, 5000);
+        }
+
+        function updateSystemStatus(isConnected) {
+            const statusBadge = document.getElementById('systemStatus');
+            const statusText = document.getElementById('statusText');
+            const statusDot = statusBadge.querySelector('.status-dot');
+
+            if (isConnected) {
+                statusBadge.classList.add('active');
+                statusBadge.classList.remove('disconnected');
+                statusDot.classList.remove('disconnected');
+                statusText.textContent = 'System Active';
+            } else {
+                statusBadge.classList.remove('active');
+                statusBadge.classList.add('disconnected');
+                statusDot.classList.add('disconnected');
+                statusText.textContent = 'Disconnected';
+            }
+        }
+
+        function flashCard(cardSelector) {
+            const card = document.querySelector(cardSelector);
+            if (card) {
+                card.classList.add('flash');
+                setTimeout(() => card.classList.remove('flash'), 400);
+            }
+        }
+
+        async function updateMetrics(data) {
+            if (!data) data = await api.get('/metrics');
+
+            document.getElementById('networksScanned').textContent = data.networksScanned || 0;
+            document.getElementById('networksChange').innerHTML =
+                data.networksChange ? `↑ ${data.networksChange} in last hour` : 'No change';
+
+            document.getElementById('threatsDetected').textContent = data.threatsDetected || 0;
+            document.getElementById('threatsChange').innerHTML =
+                data.newThreats ? `↑ ${data.newThreats} new threats` : 'No new threats';
+
+            document.getElementById('protectedDevices').textContent = data.protectedDevices || 0;
+            document.getElementById('devicesChange').innerHTML =
+                data.allSecure ? '✓ All secure' : 'Check status';
+
+            document.getElementById('detectionRate').textContent =
+                data.detectionRate ? `${data.detectionRate}%` : '--';
+            document.getElementById('rateChange').innerHTML =
+                data.rateImprovement ? `↑ ${data.rateImprovement}% improvement` : 'Stable';
+
+            flashCard('.metric-card');
+        }
+
+        async function updateThreats() {
+            const panel = document.getElementById('threatsPanel');
+
+            try {
+                const threats = await api.get('/threats');
+
+                if (threats.length === 0) {
+                    panel.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">✓</div>
+                            <p>No active threats detected</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                panel.innerHTML = threats.map(threat => `
+                    <div class="threat-item" data-mac="${escapeHtml(threat.mac)}">
+                        <div class="threat-header">
+                            <div class="threat-name">${escapeHtml(threat.ssid)}</div>
+                            <div class="severity-badge ${threat.severity.toLowerCase()}">${threat.severity}</div>
+                        </div>
+                        <div class="threat-details">
+                            <strong>MAC:</strong> ${escapeHtml(threat.mac)}<br>
+                            <strong>Legitimate:</strong> ${escapeHtml(threat.legitimateMac)}<br>
+                            <strong>Signal:</strong> ${threat.signal} dBm | 
+                            <strong>Channel:</strong> ${threat.channel} | 
+                            <strong>Encryption:</strong> ${escapeHtml(threat.encryption)}<br>
+                            <strong>Clients:</strong> ${threat.clientCount} connected | 
+                            <strong>Detected:</strong> ${formatTime(threat.detectedAt)}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to update threats:', error);
+            }
+        }
+
+        function addNewThreat(threat) {
+            const panel = document.getElementById('threatsPanel');
+
+            // Check if already exists (failsafe)
+            if (document.querySelector(`[data-mac="${threat.mac}"]`)) {
+                return updateThreat(threat);
+            }
+
+            if (panel.querySelector('.empty-state')) {
+                panel.innerHTML = '';
+            }
+
+            const threatHtml = `
+                <div class="threat-item new" data-mac="${escapeHtml(threat.mac)}">
+                    <div class="threat-header">
+                        <div class="threat-name">${escapeHtml(threat.ssid)}</div>
+                        <div class="severity-badge ${threat.severity.toLowerCase()}">${threat.severity}</div>
+                    </div>
+                    <div class="threat-details">
+                        <strong>MAC:</strong> ${escapeHtml(threat.mac)}<br>
+                        <strong>Legitimate:</strong> ${escapeHtml(threat.legitimateMac)}<br>
+                        <strong>Signal:</strong> ${threat.signal} dBm | 
+                        <strong>Channel:</strong> ${threat.channel} | 
+                        <strong>Encryption:</strong> ${escapeHtml(threat.encryption)}<br>
+                        <strong>Clients:</strong> ${threat.clientCount} connected | 
+                        <strong>Detected:</strong> ${formatTime(threat.detectedAt)}
+                    </div>
+                </div>
+            `;
+
+            panel.insertAdjacentHTML('afterbegin', threatHtml);
+            showNotification('New Threat Detected', `Evil twin "${threat.ssid}" discovered with ${threat.clientCount} connected clients`);
+        }
+
+        // Update existing threat (real-time)
+        function updateThreat(threat) {
+            const element = document.querySelector(`[data-mac="${threat.mac}"]`);
+            if (!element) return addNewThreat(threat);
+
+            element.innerHTML = `
+                <div class="threat-header">
+                    <div class="threat-name">${escapeHtml(threat.ssid)}</div>
+                    <div class="severity-badge ${threat.severity.toLowerCase()}">${threat.severity}</div>
+                </div>
+                <div class="threat-details">
+                    <strong>MAC:</strong> ${escapeHtml(threat.mac)}<br>
+                    <strong>Legitimate:</strong> ${escapeHtml(threat.legitimateMac)}<br>
+                    <strong>Signal:</strong> ${threat.signal} dBm | 
+                    <strong>Channel:</strong> ${threat.channel} | 
+                    <strong>Encryption:</strong> ${escapeHtml(threat.encryption)}<br>
+                    <strong>Clients:</strong> ${threat.clientCount} connected | 
+                    <strong>Detected:</strong> ${formatTime(threat.detectedAt)}
+                </div>
+            `;
+
+            element.classList.add('new');
+            setTimeout(() => element.classList.remove('new'), 1000);
+        }
+
+        async function updateNetworks() {
+            const panel = document.getElementById('networksPanel');
+
+            try {
+                const networks = await api.get('/networks');
+
+                if (networks.length === 0) {
+                    panel.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">📡</div>
+                            <p>No networks monitored</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                panel.innerHTML = networks.map(network => `
+                    <div class="network-item">
+                        <div class="network-name">${escapeHtml(network.ssid)}</div>
+                        <div class="network-stats">
+                            <div class="network-stat">
+                                <span>✓</span>
+                                <span>${network.status}</span>
+                            </div>
+                            <div class="network-stat">
+                                <span>📶</span>
+                                <span>${network.signal} dBm</span>
+                            </div>
+                            <div class="network-stat">
+                                <span>Ch ${network.channel}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to update networks:', error);
+            }
+        }
+
+        async function updateTimeline() {
+            const panel = document.getElementById('timelinePanel');
+
+            try {
+                const events = await api.get('/timeline');
+
+                if (events.length === 0) {
+                    panel.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-icon">📋</div>
+                            <p>No recent activity</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                panel.innerHTML = events.map(event => `
+                    <div class="timeline-item">
+                        <div class="timeline-time">${formatTime(event.timestamp)}</div>
+                        <div class="timeline-content">
+                            <div class="timeline-action">${escapeHtml(event.action)}</div>
+                            <div class="timeline-description">${escapeHtml(event.description)}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to update timeline:', error);
+            }
+        }
+
+        function addTimelineItem(event) {
+            const panel = document.getElementById('timelinePanel');
+
+            if (panel.querySelector('.empty-state')) {
+                panel.innerHTML = '';
+            }
+
+            const eventHtml = `
+                <div class="timeline-item new">
+                    <div class="timeline-time">${formatTime(event.timestamp)}</div>
+                    <div class="timeline-content">
+                        <div class="timeline-action">${escapeHtml(event.action)}</div>
+                        <div class="timeline-description">${escapeHtml(event.description)}</div>
+                    </div>
+                </div>
+            `;
+
+            panel.insertAdjacentHTML('afterbegin', eventHtml);
+        }
+
+        function setupRealTimeUpdates() {
+            if (eventSource) eventSource.close();
+
+            eventSource = new EventSource(`${API_BASE_URL}/events`);
+
+            eventSource.onopen = () => {
+                console.log('[SSE] Connected');
+                updateSystemStatus(true);
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    switch (data.type) {
+                        case 'threat_detected':
+                            addNewThreat(data.data);
+                            break;
+
+                        case 'threat_updated':
+                            updateThreat(data.data);
+                            break;
+                        case 'timeline_update':
+                            addTimelineItem(data.data);
+                            break;
+                        case 'metrics_update':
+                            updateMetrics(data.data);
+                            break;
+                        case 'scan_initiated':
+                            showNotification('Scan Started', 'Network scan initiated');
+                            break;
+                    }
+                } catch (error) {
+                    console.error('[SSE] Error:', error);
+                }
+            };
+
+            eventSource.onerror = () => {
+                console.error('[SSE] Connection error');
+                updateSystemStatus(false);
+                setTimeout(() => setupRealTimeUpdates(), 5000);
+            };
+        }
+
+        async function forceScan() {
+            const btn = document.getElementById('scanBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span>Scanning...</span>';
+
+            try {
+                await api.post('/scan', {});
+            } catch (error) {
+                alert('Failed to initiate scan: ' + error.message);
+            } finally {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerHTML = '<span>Force Scan</span>';
+                }, 2000);
+            }
+        }
+
+        async function exportReport() {
+            try {
+                const report = await api.get('/report');
+                const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `evil-twin-report-${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showNotification('Report Generated', 'Security report downloaded');
+            } catch (error) {
+                alert('Failed to export report: ' + error.message);
+            }
+        }
+
+        // Alert Configuration
+        async function configureAlerts() {
+            const modal = document.getElementById('configModal');
+            const toggle = document.getElementById('notifToggle');
+            const channelInput = document.getElementById('channelId');
+
+            try {
+                const config = await api.get('/config');
+                const isActive = config.IS_NOTIF_ON === 'True';
+
+                if (isActive) toggle.classList.add('active');
+                else toggle.classList.remove('active');
+
+                channelInput.value = config.TG_CHAT_ID || '';
+                modal.style.display = 'flex';
+            } catch (error) {
+                showNotification('Error', 'Failed to load configuration');
+            }
+        }
+
+        function closeConfig() {
+            document.getElementById('configModal').style.display = 'none';
+        }
+
+        function toggleNotif() {
+            document.getElementById('notifToggle').classList.toggle('active');
+        }
+
+        async function saveConfig() {
+            const isActive = document.getElementById('notifToggle').classList.contains('active');
+            const channelId = document.getElementById('channelId').value.trim();
+
+            if (isActive && !channelId) {
+                alert('Please enter a Telegram Channel ID');
+                return;
+            }
+
+            try {
+                await api.post('/config', {
+                    IS_NOTIF_ON: isActive ? 'True' : 'False',
+                    TG_CHAT_ID: channelId
+                });
+
+                showNotification('Settings Saved', 'Configuration updated successfully');
+                closeConfig();
+            } catch (error) {
+                showNotification('Error', 'Failed to save configuration');
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        async function init() {
+            console.log('Evil Twin Detection - Theme Switcher');
+            console.log('API:', API_BASE_URL);
+
+            initTheme();
+
+            try {
+                await Promise.all([
+                    updateMetrics(),
+                    updateThreats(),
+                    updateNetworks(),
+                    updateTimeline()
+                ]);
+
+                setupRealTimeUpdates();
+                console.log('Dashboard initialized');
+            } catch (error) {
+                console.error('Init failed:', error);
+                updateSystemStatus(false);
+            }
+        }
+
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) eventSource.close();
+        });
+
+        init();
+    </script>
+</body>
+
+</html>

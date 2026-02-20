@@ -11,9 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scapy.all import sniff
 import joblib
 import numpy as np
+import json
+import requests
 from datetime import datetime
 from collections import defaultdict
-import json
 import argparse
 from data_collection.channel_hopper import ChannelHopper
 from utils.notifications import TelegramNotifier
@@ -186,6 +187,10 @@ class AirSentinelEngine:
         print(f"  Min packets for detection: {min_packets}")
         print(f"  Alert threshold: {alert_threshold}")
         print(f"  Notfications: {self.IS_NOTIF_ON}")
+        
+        # Dashboard API
+        self.dashboard_base_url = "http://localhost:5000/api"
+        print(f"  Dashboard API: {self.dashboard_base_url}")
         print()
     
     def observe_packet(self, packet):
@@ -229,6 +234,8 @@ class AirSentinelEngine:
                 'vendor': packet_features.get('vendor', 'Unknown'),
                 'encryption': packet_features.get('encryption_type', 'Unknown'),
             }
+            # Report new network to dashboard
+            self._report_network_to_dashboard(bssid, packet_features)
         
         # Check for threats
         if len(self.ap_observations[bssid]) >= self.min_packets:
@@ -416,6 +423,42 @@ class AirSentinelEngine:
         self._log_alert(alert)
         if self.IS_NOTIF_ON:
             self.notifier.send_alert(alert)
+            
+        # Send to Dashboard
+        self._report_to_dashboard(alert)
+    
+    def _report_network_to_dashboard(self, bssid, packet_features):
+        """Send discovered network info to dashboard"""
+        try:
+            payload = {
+                'ssid': packet_features.get('ssid', 'Unknown') or 'Unknown',
+                'mac': bssid,
+                'status': 'Monitored',
+                'signal': int(packet_features.get('rssi', -100)) if packet_features.get('rssi') else -100,
+                'channel': int(packet_features.get('channel', 1)),
+                'vendor': packet_features.get('vendor', 'Unknown')
+            }
+            requests.post(f"{self.dashboard_base_url}/networks", json=payload, timeout=1)
+        except:
+            pass
+
+    def _report_to_dashboard(self, alert):
+        """Send threat to dashboard API"""
+        try:
+            payload = {
+                'ssid': alert['ssid'],
+                'mac': alert['bssid'],
+                'legitimateMac': 'Unknown',  # Default if not available
+                'signal': int(alert['features'].get('rssi_mean', 0)),
+                'channel': int(alert['features'].get('channel', 1)),
+                'encryption': alert['features'].get('encryption', 'Open'),
+                'severity': alert['level'].capitalize(),
+                'clientCount': 0  # Default or extract from features if available
+            }
+            
+            requests.post(f"{self.dashboard_base_url}/threats", json=payload, timeout=2)
+        except Exception as e:
+            pass
     
     def _extract_features(self, bssid):
         """Extract features for a BSSID"""
@@ -636,6 +679,10 @@ Examples:
                         help='Minimum packets before checking (default: 10)')
     parser.add_argument('--threshold', type=float, default=-0.3,
                         help='Alert threshold (default: -0.3, lower=more sensitive)')
+    parser.add_argument('--channels',
+                        help='Comma separated channel list (e.g. 1,6,11)')
+    parser.add_argument('--dwell-time', type=float, default=1.0,
+                        help='Seconds to stay on each channel (default: 1.0)')
     
     args = parser.parse_args()
     
@@ -652,7 +699,12 @@ Examples:
         alert_threshold=args.threshold
     )
     
-    engine.start(interface=args.interface, duration=args.duration)
+    engine.start(
+        interface=args.interface, 
+        duration=args.duration,
+        channels=args.channels,
+        dwell_time=args.dwell_time
+    )
 
 
 if __name__ == "__main__":
